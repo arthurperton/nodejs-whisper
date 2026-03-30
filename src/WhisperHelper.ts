@@ -3,6 +3,13 @@ import fs from 'fs'
 import { MODELS_LIST, MODEL_OBJECT, WHISPER_CPP_PATH } from './constants'
 import { IOptions } from '.'
 
+const escapeArg = (arg: string) => {
+	if (process.platform === 'win32') {
+		return `"${arg.replace(/"/g, '\\"')}"`
+	}
+	return `"${arg}"`
+}
+
 // Get the correct executable path based on platform and build system
 function getExecutablePath(): string {
 	const execName = process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli'
@@ -55,14 +62,6 @@ export const constructCommand = (filePath: string, args: IOptions): string => {
 
 	const modelName = MODEL_OBJECT[args.modelName as keyof typeof MODEL_OBJECT]
 
-	// Construct command with proper path escaping
-	const escapeArg = (arg: string) => {
-		if (process.platform === 'win32') {
-			return `"${arg.replace(/"/g, '\\"')}"`
-		}
-		return `"${arg}"`
-	}
-
 	// Use relative model path from whisper.cpp directory
 	const modelArg = `./models/${modelName}`
 
@@ -72,20 +71,86 @@ export const constructCommand = (filePath: string, args: IOptions): string => {
 }
 
 const constructOptionsFlags = (args: IOptions): string => {
-	let flags = [
-		args.whisperOptions?.outputInCsv ? '-ocsv ' : '',
-		args.whisperOptions?.outputInJson ? '-oj ' : '',
-		args.whisperOptions?.outputInJsonFull ? '-ojf ' : '',
-		args.whisperOptions?.outputInLrc ? '-olrc ' : '',
-		args.whisperOptions?.outputInSrt ? '-osrt ' : '',
-		args.whisperOptions?.outputInText ? '-otxt ' : '',
-		args.whisperOptions?.outputInVtt ? '-ovtt ' : '',
-		args.whisperOptions?.outputInWords ? '-owts ' : '',
-		args.whisperOptions?.translateToEnglish ? '-tr ' : '',
-		args.whisperOptions?.wordTimestamps ? '-ml 1 ' : '',
-		args.whisperOptions?.timestamps_length ? `-ml ${args.whisperOptions.timestamps_length} ` : '',
-		args.whisperOptions?.splitOnWord ? '-sow true ' : '',
-	].join('')
+	const o = args.whisperOptions
+	if (!o) return ''
 
-	return flags.trim()
+	const flags: string[] = []
+
+	const pushBool = (on: boolean | undefined, flag: string) => {
+		if (on) flags.push(flag)
+	}
+	const pushNum = (value: number | undefined, flag: string) => {
+		if (value === 0 || value) flags.push(`${flag} ${value}`)
+	}
+	const pushStr = (value: string | undefined, flag: string, { quote = false }: { quote?: boolean } = {}) => {
+		if (value === '') return
+		if (value) flags.push(`${flag} ${quote ? escapeArg(value) : value}`)
+	}
+
+	// Performance
+	pushNum(o.threads, '-t')
+	pushNum(o.processors, '-p')
+
+	// Offsets / duration
+	pushNum(o.offsetT, '-ot')
+	pushNum(o.offsetN, '-on')
+	pushNum(o.duration, '-d')
+
+	// Decoding / context
+	pushNum(o.maxContext, '-mc')
+	pushNum(o.maxLen ?? o.timestamps_length, '-ml')
+	pushBool(o.splitOnWord, '-sow')
+	pushNum(o.bestOf, '-bo')
+	pushNum(o.beamSize, '-bs')
+	pushNum(o.audioCtx, '-ac')
+	pushNum(o.wordThold, '-wt')
+	pushNum(o.entropyThold, '-et')
+	pushNum(o.logprobThold, '-lpt')
+	pushNum(o.noSpeechThold, '-nth')
+	pushNum(o.temperature, '-tp')
+	pushNum(o.temperatureInc, '-tpi')
+
+	// Modes
+	pushBool(o.debugMode, '-debug')
+	pushBool(o.translateToEnglish, '-tr')
+	pushBool(o.diarize, '-di')
+	pushBool(o.tinyDiarize, '-tdrz')
+	pushBool(o.noFallback, '-nf')
+
+	// Outputs
+	pushBool(o.outputInText, '-otxt')
+	pushBool(o.outputInVtt, '-ovtt')
+	pushBool(o.outputInSrt, '-osrt')
+	pushBool(o.outputInLrc, '-olrc')
+	pushBool(o.outputInWords || o.wordTimestamps, '-owts')
+	pushBool(o.outputInCsv, '-ocsv')
+	pushBool(o.outputInJson, '-oj')
+	pushBool(o.outputInJsonFull, '-ojf')
+	pushStr(o.fontPath, '-fp', { quote: true })
+	pushStr(o.outputFile, '-of', { quote: true })
+
+	// Printing
+	pushBool(o.noPrints, '-np')
+	pushBool(o.printSpecial, '-ps')
+	pushBool(o.printColors, '-pc')
+	pushBool(o.printProgress, '-pp')
+	pushBool(o.noTimestamps, '-nt')
+
+	// Language / prompt
+	pushBool(o.detectLanguage, '-dl')
+	pushStr(o.prompt, '--prompt', { quote: true })
+
+	// Runtime extras
+	pushStr(o.ovEDevice, '-oved', { quote: true })
+	pushStr(o.dtw, '-dtw', { quote: true })
+	pushBool(o.logScore, '-ls')
+	pushBool(o.noGpu, '-ng')
+	pushBool(o.flashAttn, '-fa')
+	pushBool(o.suppressNst, '-sns')
+	pushStr(o.suppressRegex, '--suppress-regex', { quote: true })
+	pushStr(o.grammar, '--grammar', { quote: true })
+	pushStr(o.grammarRule, '--grammar-rule', { quote: true })
+	pushNum(o.grammarPenalty, '--grammar-penalty')
+
+	return flags.join(' ').trim()
 }
